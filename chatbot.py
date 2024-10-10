@@ -5,8 +5,22 @@ from invoke_agent import ask_bedrock_agent  # 필요한 함수들 import
 from lambda_function import get_s3_data_via_lambda
 import json
 from datetime import datetime
+from PIL import Image, ImageOps, ImageDraw
 
+#deco
+def crop_to_circle(image):
+    mask = Image.new('L', image.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.ellipse((0, 0) + image.size, fill=255)
+    result = ImageOps.fit(image, mask.size, centering=(0.5, 0.5))
+    result.putalpha(mask)
+    return result
 
+# Load images outside the loop to optimize performance
+human_image = Image.open('human_face.png')
+robot_image = Image.open('robot_face.jpg')
+circular_human_image = crop_to_circle(human_image)
+circular_robot_image = crop_to_circle(robot_image)
 
 
 def render_chart(chart_type, data, title, value_col):
@@ -81,7 +95,7 @@ def render_chart(chart_type, data, title, value_col):
 
 # 앱 메인 함수
 def app():
-    st.title("🐄 Smarter Farmer 🐟")
+    st.title("🐄Data Flow🐟")
 
     # 레이아웃 설정 (왼쪽: 데이터, 오른쪽: 챗봇)
     col1, col2 = st.columns([2, 1])
@@ -115,7 +129,9 @@ def app():
                     try:
                         # Bedrock에서 응답 받기
                         bot_response = ask_bedrock_agent(question)
-                        st.write(f"**SFarmer:** {bot_response}")
+                        st.image(circular_robot_image,width=45)
+                        st.write(f"**DataTalk:** {bot_response}")
+                        
                         
                         # 질문에 따라 차트 그리기
                         if question == "Show the bar chart for the catchment with the highest Total Phosphorus.":
@@ -140,30 +156,27 @@ def chatbot_interaction(nitrogen_data, phosphorus_data):
     if 'chat_history' not in st.session_state:
         st.session_state.chat_history = []
 
-    st.subheader("Chat with Smarter Farmer Assistant")
+    if 'waiting_for_response' not in st.session_state:
+        st.session_state.waiting_for_response = False  # 응답 대기 상태 플래그
 
-    # 채팅 기록 표시
-    for chat in st.session_state.chat_history:
-        if chat["role"] == "user":
-            st.write(f"**You:** {chat['message']}")
-        else:
-            st.write(f"**SFarmer:** {chat['message']}")
+    st.subheader("Chat with Smarter Farmer Assistant")
 
     # 사용자 입력 필드
     user_input = st.text_input("Ask a question to Smarter Farmer...")
 
     # 입력값 제출 버튼
-    if st.button("Submit") and user_input:
-        st.write(f"**You:** {user_input}")
+    if st.button("Submit") and user_input and not st.session_state.waiting_for_response:
+        # 질문을 제출하면 응답을 기다리는 중으로 상태 설정
         st.session_state.chat_history.append({"role": "user", "message": user_input})
+        st.session_state.waiting_for_response = True  # 응답 대기 상태로 전환
 
+        # Bedrock 에이전트로부터 응답을 비동기로 받기
         try:
-            # Bedrock 에이전트로부터 응답 받기
             bot_response = ask_bedrock_agent(user_input)
             st.session_state.chat_history.append({"role": "bot", "message": bot_response})
-            st.write(f"**SFarmer:** {bot_response}")
+            st.session_state.chat_history[-1]["answer"] = bot_response  # 응답 저장
 
-            # 응답에 따라 차트 그리기
+            # 응답에 따라 차트 그리기 (조건에 맞게 차트 그리기)
             if "bar chart for nitrogen" in bot_response.lower():
                 render_chart("bar", nitrogen_data, "Bar Chart for Nitrogen Levels", 'Value')
             elif "line chart for nitrogen" in bot_response.lower():
@@ -175,3 +188,26 @@ def chatbot_interaction(nitrogen_data, phosphorus_data):
 
         except Exception as e:
             st.error(f"Error fetching response: {str(e)}")
+            st.session_state.chat_history[-1]["answer"] = "Error occurred while fetching response."
+
+        finally:
+            st.session_state.waiting_for_response = False  # 응답을 받은 후 대기 상태 해제
+
+    # 채팅 기록 표시 (최근 것이 가장 아래로 표시)
+    for index, chat in enumerate(st.session_state['chat_history']):
+        if chat['role'] == "user":
+            # 사용자 질문 표시
+            col1_q, col2_q = st.columns([2, 10])
+            with col1_q:
+                st.image(circular_human_image, width=45)
+            with col2_q:
+                st.text_area("Q:", value=chat["message"], height=50, key=f"question_{index}", disabled=True)
+
+        elif chat['role'] == "bot":
+            # 봇 응답 표시
+            col1_a, col2_a = st.columns([2, 10])
+            with col1_a:
+                st.image(circular_robot_image, width=45)
+            with col2_a:
+                # 답변 크기를 자동 조정하여 출력
+                st.markdown(f"**A:** {chat.get('answer', 'No answer available')}")

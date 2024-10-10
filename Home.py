@@ -26,7 +26,8 @@ st.sidebar.markdown(
 
 # 로고 삽입 (로고 파일의 경로)
 st.sidebar.image("logo.png", use_column_width=True)
-st.sidebar.title("Better Farming, Better Tomorrow!")
+st.sidebar.markdown("<h1>Understanding Data,<br>Better Tomorrow!</h1>", unsafe_allow_html=True)
+
 
 # Chatbot 페이지를 기본값으로 표시
 if "page" not in st.session_state:
